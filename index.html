@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>ReadLens</title>
+  
+  <!-- PWA & Mobile Meta Tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ReadLens" />
+  <meta name="theme-color" content="#0F172A" />
+  <link rel="apple-touch-icon" href="https://img.icons8.com/isometric/180/000000/book.png" />
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tesseract.js OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#EEF2FF',
+              100: '#E0E7FF',
+              500: '#6366F1',
+              600: '#4F46E5',
+              700: '#4338CA',
+              900: '#312E81'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    /* iOS Safe Area Padding */
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    
+    .token-highlight {
+      background-color: #FDE047;
+      color: #0F172A;
+      border-radius: 0.25rem;
+      padding: 0.125rem 0.25rem;
+      font-weight: 600;
+      box-shadow: 0 0 0 2px #FACC15;
+    }
+
+    .sentence-highlight {
+      background-color: #E0E7FF;
+      color: #312E81;
+      border-radius: 0.375rem;
+      padding: 0.25rem 0.375rem;
+    }
+    .dark .sentence-highlight {
+      background-color: #312E81;
+      color: #EEF2FF;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-500 selection:text-white">
+
+  <!-- Header Navigation -->
+  <header class="bg-slate-800/90 backdrop-blur border-b border-slate-700/60 sticky top-0 z-40 px-4 py-3 flex items-center justify-between shadow-md">
+    <div class="flex items-center space-x-2">
+      <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-inner">
+        <i class="fa-solid fa-glasses"></i>
+      </div>
+      <h1 class="font-bold text-lg tracking-tight text-white">ReadLens</h1>
+    </div>
+    
+    <div class="flex items-center space-x-2">
+      <button id="apiKeyBtn" title="Gemini API Key" class="p-2 text-slate-300 hover:text-white bg-slate-700/50 hover:bg-slate-700 rounded-lg transition">
+        <i class="fa-solid fa-key"></i>
+      </button>
+      <button id="cameraBtn" class="flex items-center space-x-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs rounded-lg shadow transition active:scale-95">
+        <i class="fa-solid fa-camera"></i>
+        <span>Scan</span>
+      </button>
+      <input type="file" id="imageInput" accept="image/*" capture="environment" class="hidden" />
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-2xl w-full mx-auto p-4 flex flex-col space-y-4">
+
+    <!-- OCR Loading State -->
+    <div id="ocrProgressCard" class="hidden bg-slate-800 border border-slate-700 rounded-xl p-4 shadow-sm animate-pulse flex items-center space-x-3">
+      <div class="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+      <div class="flex-1">
+        <p id="ocrStatusText" class="text-xs font-semibold text-indigo-400">Processing Document...</p>
+        <p class="text-[11px] text-slate-400">Extracting text & normalizing character boundaries</p>
+      </div>
+    </div>
+
+    <!-- Mode Selector Controls -->
+    <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-2 flex items-center justify-between text-xs font-medium gap-1 shadow-sm">
+      <button id="modeWord" class="mode-btn flex-1 py-2 px-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700/50 transition text-center active">
+        <i class="fa-solid fa-[#]"></i> Word
+      </button>
+      <button id="modeSentence" class="mode-btn flex-1 py-2 px-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700/50 transition text-center">
+        <i class="fa-solid fa-align-left"></i> Sentence
+      </button>
+      <button id="modeContinuous" class="mode-btn flex-1 py-2 px-3 rounded-lg text-slate-300 hover:text-white hover:bg-slate-700/50 transition text-center">
+        <i class="fa-solid fa-play"></i> Continuous
+      </button>
+    </div>
+
+    <!-- Text Display Viewport -->
+    <div class="flex-1 bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-inner flex flex-col justify-between min-h-[260px] relative">
+      <div id="textDisplay" class="text-base sm:text-lg leading-relaxed text-slate-200 overflow-y-auto max-h-[380px] space-y-2 pr-1">
+        <p class="text-slate-400 italic text-center my-auto pt-12">
+          Tap <strong>Scan</strong> to capture text from paper, or paste/type text into the editor below to begin reading.
+        </p>
+      </div>
+
+      <!-- Playback Controls -->
+      <div class="mt-4 pt-3 border-t border-slate-700/80 flex items-center justify-between gap-2">
+        <button id="prevBtn" class="p-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl shadow transition active:scale-95 disabled:opacity-40">
+          <i class="fa-solid fa-backward-step"></i>
+        </button>
+        <button id="playPauseBtn" class="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl shadow-lg transition active:scale-95 flex items-center justify-center space-x-2">
+          <i class="fa-solid fa-play" id="playIcon"></i>
+          <span id="playText">Start Reading</span>
+        </button>
+        <button id="nextBtn" class="p-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl shadow transition active:scale-95 disabled:opacity-40">
+          <i class="fa-solid fa-forward-step"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Reading Speed & Settings Bar -->
+    <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-3 flex items-center justify-between text-xs text-slate-300">
+      <span class="flex items-center space-x-1.5 font-medium">
+        <i class="fa-solid fa-gauge-high text-indigo-400"></i>
+        <span>Speed</span>
+      </span>
+      <div class="flex items-center space-x-3">
+        <input type="range" id="speedRate" min="0.4" max="1.6" step="0.1" value="0.9" class="w-28 accent-indigo-500 cursor-pointer" />
+        <span id="speedVal" class="font-mono bg-slate-700 px-2 py-0.5 rounded text-[11px] font-bold text-indigo-300">0.9x</span>
+      </div>
+    </div>
+
+    <!-- Manual Text Editor Box -->
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-sm flex flex-col space-y-2">
+      <div class="flex items-center justify-between">
+        <label for="rawInput" class="text-xs font-semibold text-slate-300 flex items-center space-x-1.5">
+          <i class="fa-solid fa-[#]"></i>
+          <span>Document Text / OCR Source</span>
+        </label>
+        <button id="formatTextBtn" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium flex items-center space-x-1">
+          <i class="fa-solid fa-wand-magic-sparkles"></i>
+          <span>Clean Word Spacing</span>
+        </button>
+      </div>
+      <textarea id="rawInput" rows="4" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs sm:text-sm text-slate-200 focus:outline-none focus:border-indigo-500 resize-none font-sans" placeholder="Paste or type text here..."></textarea>
+    </div>
+
+    <!-- AI Quiz Generator Action -->
+    <button id="generateQuizBtn" class="w-full py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-indigo-300 font-semibold text-xs sm:text-sm rounded-xl transition flex items-center justify-center space-x-2 shadow-sm">
+      <i class="fa-solid fa-brain text-indigo-400"></i>
+      <span>Generate Comprehension Quiz</span>
+    </button>
+
+    <!-- Quiz Output Container -->
+    <div id="quizContainer" class="hidden bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-md space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+        <h2 class="text-sm font-bold text-white flex items-center space-x-2">
+          <i class="fa-solid fa-square-check text-indigo-400"></i>
+          <span>Comprehension Check</span>
+        </h2>
+        <span id="quizScore" class="text-xs font-mono bg-indigo-950 text-indigo-300 border border-indigo-800/60 px-2 py-0.5 rounded-full"></span>
+      </div>
+      <div id="quizQuestions" class="space-y-4"></div>
+    </div>
+
+  </main>
+
+  <script>
+    // System State Variables
+    let currentMode = 'word'; // 'word' | 'sentence' | 'continuous'
+    let textTokens = [];
+    let sentenceTokens = [];
+    let currentTokenIdx = 0;
+    let isReading = false;
+    let synth = window.speechSynthesis;
+    let currentUtterance = null;
+    let apiKey = localStorage.getItem('gemini_key') || '';
+
+    // DOM Elements
+    const rawInput = document.getElementById('rawInput');
+    const textDisplay = document.getElementById('textDisplay');
+    const cameraBtn = document.getElementById('cameraBtn');
+    const imageInput = document.getElementById('imageInput');
+    const ocrProgressCard = document.getElementById('ocrProgressCard');
+    const ocrStatusText = document.getElementById('ocrStatusText');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const playIcon = document.getElementById('playIcon');
+    const playText = document.getElementById('playText');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const speedRate = document.getElementById('speedRate');
+    const speedVal = document.getElementById('speedVal');
+    const formatTextBtn = document.getElementById('formatTextBtn');
+    const apiKeyBtn = document.getElementById('apiKeyBtn');
+    const generateQuizBtn = document.getElementById('generateQuizBtn');
+    const quizContainer = document.getElementById('quizContainer');
+    const quizQuestions = document.getElementById('quizQuestions');
+
+    // Space Normalizer and OCR Word Boundary Cleaning Pipeline
+    function sanitizeAndSeparateText(rawStr) {
+      if (!rawStr) return '';
+      return rawStr
+        .replace(/[\u00A0\u1680\u180E\u2000-\u200B\u202F\u205F\u3000\uFEFF]/g, ' ') // Convert all Unicode/non-breaking spaces to ASCII space
+        .replace(/(\w)-\n(\w)/g, '$1$2') // Reconnect hyphenated line breaks
+        .replace(/\n+/g, ' ') // Convert newlines to spaces
+        .replace(/([a-[z])([A-Z])/g, '$1 $2') // Separate joined CamelCase words
+        .replace(/([a-zA-Z0-9])([.,!?:;])([a-zA-Z])/g, '$1$2 $3') // Insert space missing after punctuation
+        .replace(/([a-zA-Z])([0-9])/g, '$1 $2') // Separate letter-digit glue
+        .replace(/([0-9])([a-zA-Z])/g, '$1 $2')
+        .replace(/\s+/g, ' ') // Collapse multiple spaces
+        .trim();
+    }
+
+    function parseTokens() {
+      const cleanText = sanitizeAndSeparateText(rawInput.value);
+      if (!cleanText) {
+        textTokens = [];
+        sentenceTokens = [];
+        renderDisplay();
+        return;
+      }
+
+      // Word Tokenizer
+      textTokens = cleanText.split(' ').filter(w => w.length > 0);
+
+      // Sentence Tokenizer
+      sentenceTokens = cleanText.match(/[^.!?]+[.!?]+/g) || [cleanText];
+      sentenceTokens = sentenceTokens.map(s => s.trim()).filter(s => s.length > 0);
+
+      if (currentTokenIdx >= textTokens.length) {
+        currentTokenIdx = 0;
+      }
+      renderDisplay();
+    }
+
+    function renderDisplay() {
+      if (!textTokens.length) {
+        textDisplay.innerHTML = `<p class="text-slate-400 italic text-center my-auto pt-12">Tap <strong>Scan</strong> to capture text from paper, or paste/type text into the editor below to begin reading.</p>`;
+        return;
+      }
+
+      if (currentMode === 'word') {
+        textDisplay.innerHTML = textTokens.map((w, i) => {
+          const isHighlighted = i === currentTokenIdx;
+          return `<span class="${isHighlighted ? 'token-highlight' : 'text-slate-200'} transition-all duration-150 inline-block m-0.5">${escapeHtml(w)}</span>`;
+        }).join(' ');
+      } else if (currentMode === 'sentence') {
+        let currentWordCount = 0;
+        let activeSentenceIdx = 0;
+        
+        // Find active sentence index based on word position
+        for (let sIdx = 0; sIdx < sentenceTokens.length; sIdx++) {
+          const sWords = sentenceTokens[sIdx].split(' ').filter(w => w.length > 0).length;
+          if (currentTokenIdx >= currentWordCount && currentTokenIdx < currentWordCount + sWords) {
+            activeSentenceIdx = sIdx;
+            break;
+          }
+          currentWordCount += sWords;
+        }
+
+        textDisplay.innerHTML = sentenceTokens.map((s, i) => {
+          const isHighlighted = i === activeSentenceIdx;
+          return `<span class="${isHighlighted ? 'sentence-highlight font-medium' : 'text-slate-300'} inline-block my-1 leading-relaxed">${escapeHtml(s)}</span>`;
+        }).join(' ');
+      } else {
+        // Continuous Mode
+        textDisplay.innerHTML = `<p class="text-slate-200 leading-relaxed font-sans">${escapeHtml(textTokens.join(' '))}</p>`;
+      }
+
+      // Auto-scroll highlighted token into view
+      const activeEl = textDisplay.querySelector('.token-highlight, .sentence-highlight');
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Speech Engine Functions
+    function speakCurrentToken() {
+      if (!isReading || !textTokens.length) return;
+
+      synth.cancel();
+
+      let textToSpeak = '';
+      if (currentMode === 'word') {
+        textToSpeak = textTokens[currentTokenIdx] || '';
+      } else if (currentMode === 'sentence') {
+        let currentWordCount = 0;
+        for (let sIdx = 0; sIdx < sentenceTokens.length; sIdx++) {
+          const sWords = sentenceTokens[sIdx].split(' ').filter(w => w.length > 0).length;
+          if (currentTokenIdx >= currentWordCount && currentTokenIdx < currentWordCount + sWords) {
+            textToSpeak = sentenceTokens[sIdx];
+            break;
+          }
+          currentWordCount += sWords;
+        }
+      } else {
+        textToSpeak = textTokens.slice(currentTokenIdx).join(' ');
+      }
+
+      if (!textToSpeak) {
+        stopPlayback();
+        return;
+      }
+
+      currentUtterance = new SpeechSynthesisUtterance(textToSpeak + ' ');
+      currentUtterance.rate = parseFloat(speedRate.value);
+
+      currentUtterance.onend = () => {
+        if (!isReading) return;
+        if (currentMode === 'word') {
+          if (currentTokenIdx < textTokens.length - 1) {
+            currentTokenIdx++;
+            renderDisplay();
+            setTimeout(speakCurrentToken, 120);
+          } else {
+            stopPlayback();
+          }
+        } else if (currentMode === 'sentence') {
+          // Advance to next sentence start
+          let currentWordCount = 0;
+          for (let sIdx = 0; sIdx < sentenceTokens.length; sIdx++) {
+            const sWords = sentenceTokens[sIdx].split(' ').filter(w => w.length > 0).length;
+            if (currentTokenIdx >= currentWordCount && currentTokenIdx < currentWordCount + sWords) {
+              currentTokenIdx = currentWordCount + sWords;
+              break;
+            }
+            currentWordCount += sWords;
+          }
+          if (currentTokenIdx < textTokens.length) {
+            renderDisplay();
+            setTimeout(speakCurrentToken, 200);
+          } else {
+            stopPlayback();
+          }
+        } else {
+          stopPlayback();
+        }
+      };
+
+      currentUtterance.onerror = () => stopPlayback();
+      synth.speak(currentUtterance);
+    }
+
+    function togglePlayback() {
+      if (isReading) {
+        stopPlayback();
+      } else {
+        if (!textTokens.length) return;
+        isReading = true;
+        playIcon.className = "fa-solid fa-pause";
+        playText.textContent = "Pause";
+        speakCurrentToken();
+      }
+    }
+
+    function stopPlayback() {
+      isReading = false;
+      synth.cancel();
+      playIcon.className = "fa-solid fa-play";
+      playText.textContent = "Start Reading";
+    }
+
+    // Event Listeners
+    rawInput.addEventListener('input', () => {
+      stopPlayback();
+      parseTokens();
+    });
+
+    formatTextBtn.addEventListener('click', () => {
+      rawInput.value = sanitizeAndSeparateText(rawInput.value);
+      parseTokens();
+    });
+
+    speedRate.addEventListener('input', (e) => {
+      speedVal.textContent = e.target.value + 'x';
+      if (isReading) {
+        speakCurrentToken();
+      }
+    });
+
+    // Mode Switches
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active', 'bg-indigo-600', 'text-white'));
+        e.currentTarget.classList.add('active', 'bg-indigo-600', 'text-white');
+        
+        if (e.currentTarget.id === 'modeWord') currentMode = 'word';
+        if (e.currentTarget.id === 'modeSentence') currentMode = 'sentence';
+        if (e.currentTarget.id === 'modeContinuous') currentMode = 'continuous';
+
+        stopPlayback();
+        renderDisplay();
+      });
+    });
+
+    // Step Navigation Controls
+    prevBtn.addEventListener('click', () => {
+      stopPlayback();
+      if (currentTokenIdx > 0) {
+        currentTokenIdx--;
+        renderDisplay();
+      }
+    });
+
+    nextBtn.addEventListener('click', () => {
+      stopPlayback();
+      if (currentTokenIdx < textTokens.length - 1) {
+        currentTokenIdx++;
+        renderDisplay();
+      }
+    });
+
+    playPauseBtn.addEventListener('click', togglePlayback);
+
+    // OCR Camera Capture
+    cameraBtn.addEventListener('click', () => imageInput.click());
+
+    imageInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      ocrProgressCard.classList.remove('hidden');
+      ocrStatusText.textContent = "Extracting text from image...";
+
+      try {
+        const worker = await Tesseract.createWorker('eng');
+        await worker.setParameters({
+          preserve_interword_spaces: '1',
+        });
+        
+        const { data: { text } } = await worker.recognize(file);
+        await worker.terminate();
+
+        rawInput.value = sanitizeAndSeparateText(text);
+        parseTokens();
+      } catch (err) {
+        alert("OCR Error processing image. Please try again or paste text manually.");
+      } finally {
+        ocrProgressCard.classList.add('hidden');
+      }
+    });
+
+    // Gemini Key Setup
+    apiKeyBtn.addEventListener('click', () => {
+      const input = prompt("Enter your Google Gemini API Key:", apiKey);
+      if (input !== null) {
+        apiKey = input.trim();
+        localStorage.setItem('gemini_key', apiKey);
+      }
+    });
+
+    // Quiz Generator
+    generateQuizBtn.addEventListener('click', async () => {
+      const text = rawInput.value.trim();
+      if (!text) {
+        alert("Please scan or enter some text first.");
+        return;
+      }
+
+      quizContainer.classList.remove('hidden');
+      quizQuestions.innerHTML = `<div class="text-center py-4"><i class="fa-solid fa-spinner fa-spin text-indigo-400 text-xl"></i><p class="text-xs text-slate-400 mt-2">Generating questions...</p></div>`;
+
+      if (apiKey) {
+        try {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [{
+                  text: `Create a 3-question multiple-choice quiz based on this text. Return JSON array with objects containing: question, options (array of 4 strings), answer (index 0-3). Text: ${text}`
+                }]
+              }]
+            })
+          });
+          const data = await res.json();
+          const jsonText = data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim();
+          const quizData = JSON.parse(jsonText);
+          renderQuiz(quizData);
+          return;
+        } catch (e) {
+          console.warn("Gemini API request failed, falling back to heuristic quiz.");
+        }
+      }
+
+      // Offline Fallback Heuristic Quiz Generator
+      const words = textTokens.filter(w => w.length > 4);
+      const sampleWord = words[Math.floor(Math.random() * words.length)] || "text";
+      const sampleWord2 = words[Math.floor(Math.random() * words.length)] || "reading";
+
+      renderQuiz([
+        {
+          question: `What is a main topic or keyword featured in this reading section?`,
+          options: [sampleWord, "Space Exploration", "Quantum Physics", "Global Finance"],
+          answer: 0
+        },
+        {
+          question: `Which of the following words appears directly in the parsed text?`,
+          options: ["Extravagant", sampleWord2, "Hypothetical", "Subterranean"],
+          answer: 1
+        }
+      ]);
+    });
+
+    function renderQuiz(questions) {
+      quizQuestions.innerHTML = questions.map((q, qIdx) => `
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-700/60 space-y-2">
+          <p class="text-xs font-semibold text-slate-200">${qIdx + 1}. ${escapeHtml(q.question)}</p>
+          <div class="grid grid-cols-1 gap-1.5">
+            ${q.options.map((opt, oIdx) => `
+              <button onclick="checkAnswer(${qIdx}, ${oIdx},${q.answer}, this)" class="w-full text-left p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-300 transition">
+                ${escapeHtml(opt)}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    window.checkAnswer = function(qIdx, selected, correct, btnEl) {
+      const parent = btnEl.parentElement;
+      const buttons = parent.querySelectorAll('button');
+      buttons.forEach((b, idx) => {
+        b.disabled = true;
+        if (idx === correct) {
+          b.className = "w-full text-left p-2 rounded-lg bg-emerald-950 border border-emerald-600 text-xs text-emerald-200 font-semibold";
+        } else if (idx === selected) {
+          b.className = "w-full text-left p-2 rounded-lg bg-rose-950 border border-rose-600 text-xs text-rose-200";
+        }
+      });
+    };
+
+    // Initial setup
+    document.getElementById('modeWord').classList.add('bg-indigo-600', 'text-white');
+  </script>
+</body>
+</html>
